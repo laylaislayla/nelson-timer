@@ -1,0 +1,232 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>넬슨 카운트다운</title>
+
+  <style>
+    body {
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      padding: 24px;
+      line-height: 1.6;
+    }
+    .wrap {
+      max-width: 760px;
+      margin: 0 auto;
+    }
+    .card {
+      border: 1px solid #e5e7eb;
+      border-radius: 16px;
+      padding: 20px;
+    }
+
+    /* 상단 2줄 */
+    .big {
+      font-size: 22px;
+      font-weight: 800;
+    }
+
+    /* 하단 3줄 (2pt 작게) */
+    .big.small {
+      font-size: 20px;
+      font-weight: 700;
+    }
+
+    .mono {
+      font-variant-numeric: tabular-nums;
+    }
+
+    .sp {
+      height: 12px;
+    }
+
+    .muted {
+      color: #6b7280;
+      font-size: 14px;
+      margin-top: 12px;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="wrap">
+    <div class="card">
+
+      <!-- 상단 문구 -->
+      <div id="todayLine" class="big mono">
+        넬슨 없는 오늘은 00/00일
+      </div>
+
+      <div id="workdaysLine" class="big mono">
+        넬슨 오는 4/6일까지 00일 남았어요
+      </div>
+
+      <div class="sp"></div>
+
+      <!-- 카운트다운 (하단 3줄) -->
+      <div id="calendarCountdownLine" class="big small mono">
+        지금 현재 시간 기준으로 00일 00시간 00분 남았어요
+      </div>
+
+      <div id="workdayCountdownLine" class="big small mono">
+        워킹데이 기준으로 00일 00시간 00분 남았어요
+      </div>
+
+      <div id="workhourCountdownLine" class="big small mono">
+        워킹아워 기준으로 00일 00시간 00분 남았어요
+      </div>
+
+      <div class="muted">
+        제외: 오늘 · 주말 · 1/30, 2/16~18, 2/27, 3/2, 3/27<br />
+        워킹아워: 평일 09:00~18:00 (점심 12:00~13:00 제외, 하루 8시간)
+      </div>
+
+    </div>
+  </div>
+
+  <script>
+    /* ===== 설정 ===== */
+    const TARGET_ISO = "2026-04-06T23:59:59+09:00";
+    const END_DATE_KEY = "2026-04-06";
+
+    const EXCLUDED = new Set([
+      "2026-01-30",
+      "2026-02-16", "2026-02-17", "2026-02-18",
+      "2026-02-27",
+      "2026-03-02",
+      "2026-03-27"
+    ]);
+
+    const WORK_START = { h: 9, m: 0 };
+    const LUNCH_START = { h: 12, m: 0 };
+    const LUNCH_END = { h: 13, m: 0 };
+    const WORK_END = { h: 18, m: 0 };
+
+    /* ===== 유틸 ===== */
+    function pad2(n) {
+      return String(n).padStart(2, "0");
+    }
+
+    function toKSTDateKey(d) {
+      return new Intl.DateTimeFormat("sv-SE", {
+        timeZone: "Asia/Seoul",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit"
+      }).format(d);
+    }
+
+    function addDaysKST(dateKey, days) {
+      const d = new Date(dateKey + "T00:00:00+09:00");
+      d.setDate(d.getDate() + days);
+      return toKSTDateKey(d);
+    }
+
+    function kstDateTime(dateKey, h, m) {
+      return new Date(`${dateKey}T${pad2(h)}:${pad2(m)}:00+09:00`);
+    }
+
+    function isWorkingDateKey(dateKey, todayKey) {
+      if (dateKey === todayKey) return false;
+      if (EXCLUDED.has(dateKey)) return false;
+      const d = new Date(dateKey + "T00:00:00+09:00");
+      const day = d.getDay();
+      return !(day === 0 || day === 6);
+    }
+
+    /* ===== 계산 ===== */
+    function countWorkingDays(todayKey) {
+      let cur = addDaysKST(todayKey, 1);
+      let count = 0;
+      while (cur <= END_DATE_KEY) {
+        if (isWorkingDateKey(cur, todayKey)) count++;
+        cur = addDaysKST(cur, 1);
+      }
+      return count;
+    }
+
+    function remainingWorkdayMinutes(now, target) {
+      const todayKey = toKSTDateKey(now);
+      let cur = todayKey;
+      let total = 0;
+
+      while (cur <= toKSTDateKey(target)) {
+        if (isWorkingDateKey(cur, todayKey)) {
+          const start = (cur === todayKey) ? now : kstDateTime(cur, 0, 0);
+          const end = (cur === toKSTDateKey(target)) ? target : kstDateTime(cur, 23, 59);
+          const diff = end - start;
+          if (diff > 0) total += diff;
+        }
+        cur = addDaysKST(cur, 1);
+      }
+      return Math.floor(total / 60000);
+    }
+
+    function remainingWorkhourMinutes(now, target) {
+      const todayKey = toKSTDateKey(now);
+      let cur = todayKey;
+      let total = 0;
+
+      while (cur <= toKSTDateKey(target)) {
+        if (isWorkingDateKey(cur, todayKey)) {
+          const ranges = [
+            [kstDateTime(cur, WORK_START.h, WORK_START.m), kstDateTime(cur, LUNCH_START.h, LUNCH_START.m)],
+            [kstDateTime(cur, LUNCH_END.h, LUNCH_END.m), kstDateTime(cur, WORK_END.h, WORK_END.m)]
+          ];
+
+          for (const [s, e] of ranges) {
+            const start = (cur === todayKey) ? new Date(Math.max(s, now)) : s;
+            const end = (cur === toKSTDateKey(target)) ? new Date(Math.min(e, target)) : e;
+            const diff = end - start;
+            if (diff > 0) total += diff;
+          }
+        }
+        cur = addDaysKST(cur, 1);
+      }
+      return Math.floor(total / 60000);
+    }
+
+    function minutesToDHm(mins) {
+      const d = Math.floor(mins / 1440);
+      const h = Math.floor((mins % 1440) / 60);
+      const m = mins % 60;
+      return { d, h, m };
+    }
+
+    /* ===== 렌더 ===== */
+    function render() {
+      const now = new Date();
+      const todayKey = toKSTDateKey(now);
+      const [, mm, dd] = todayKey.split("-");
+
+      const workdays = countWorkingDays(todayKey);
+
+      document.getElementById("todayLine").textContent =
+        `넬슨 없는 오늘은 ${Number(mm)}/${Number(dd)}일`;
+
+      document.getElementById("workdaysLine").textContent =
+        `넬슨 오는 4/6일까지 ${workdays}일 남았어요`;
+
+      const target = new Date(TARGET_ISO);
+
+      const calMin = Math.floor((target - now) / 60000);
+      const cal = minutesToDHm(calMin);
+
+      document.getElementById("calendarCountdownLine").textContent =
+        `지금 현재 시간 기준으로 ${cal.d}일 ${pad2(cal.h)}시간 ${pad2(cal.m)}분 남았어요`;
+
+      const wd = minutesToDHm(remainingWorkdayMinutes(now, target));
+      document.getElementById("workdayCountdownLine").textContent =
+        `워킹데이 기준으로 ${wd.d}일 ${pad2(wd.h)}시간 ${pad2(wd.m)}분 남았어요`;
+
+      const wh = minutesToDHm(remainingWorkhourMinutes(now, target));
+      document.getElementById("workhourCountdownLine").textContent =
+        `워킹아워 기준으로 ${wh.d}일 ${pad2(wh.h)}시간 ${pad2(wh.m)}분 남았어요`;
+    }
+
+    render();
+    setInterval(render, 1000);
+  </script>
+</body>
+</html>ㄴ
